@@ -1,4 +1,27 @@
-# Herdr Navigator
+# Herdr Agent Picker
+
+Personal fork of [Herdr Navigator](https://github.com/thanhdat77/herdr-navigator).
+The binary, plugin ID (`herdr-navigator`), actions and configuration directory
+remain unchanged for compatibility. Install this fork with
+`herdr plugin install willfish/herdr-agent-picker --yes`.
+
+### Agent display metadata
+
+`[picker] agent_metadata = true` (default) displays and fuzzy-searches Herdr's
+`display_agent` label, including model and reasoning effort. For example,
+`qwen medium` finds `pi · medium · qwen3.8-27b`. Original agent names, kinds,
+tasks, paths and aliases remain searchable. Missing or blank metadata falls
+back to the agent name or kind. Set `agent_metadata = false` to disable this
+additional display and search behaviour. This only indexes metadata reported
+by the agent; it cannot infer a model or effort that Herdr has not received.
+
+For an agent-only picker, enable only `agents` under `[sources]`, disable
+`[jump_back] enabled` and `pin_previous`, and set `[picker] preview = false`.
+See [the agent-only configuration](examples/agent-only.toml).
+
+---
+
+# Upstream Herdr Navigator
 
 <p align="center">
   <img src="docs/assets/herdr-navigator.svg" alt="Herdr Navigator — jump to anything in Herdr" width="100%" />

@@ -7,8 +7,8 @@ use std::{
 use crate::herdr::run_herdr;
 
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
-const PLUGIN_SOURCE: &str = "thanhdat77/herdr-navigator";
-const RELEASE_REPO: &str = "https://github.com/thanhdat77/herdr-navigator.git";
+const PLUGIN_SOURCE: &str = "willfish/herdr-agent-picker";
+const RELEASE_REPO: &str = "https://github.com/willfish/herdr-agent-picker.git";
 
 pub(crate) fn check_in_background() -> Receiver<Option<String>> {
     let (sender, receiver) = mpsc::channel();

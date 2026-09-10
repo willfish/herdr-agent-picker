@@ -48,6 +48,8 @@ pub(crate) struct PickerConfig {
     #[serde(default = "default_agent_sort")]
     pub(crate) agent_sort: String,
     #[serde(default = "yes")]
+    pub(crate) agent_metadata: bool,
+    #[serde(default = "yes")]
     pub(crate) preview: bool,
     #[serde(default = "yes")]
     pub(crate) detailed_rows: bool,
@@ -269,6 +271,7 @@ impl Default for PickerConfig {
             source_order: default_source_order(),
             source_priority_boost: default_source_priority_boost(),
             agent_sort: default_agent_sort(),
+            agent_metadata: true,
             preview: true,
             detailed_rows: true,
             check_updates: true,
@@ -467,6 +470,15 @@ mod tests {
         assert_eq!(sources[1], Source::Workspace);
         assert!(!sources.contains(&Source::Server));
         assert!(!sources.contains(&Source::Session));
+    }
+
+    #[test]
+    fn agent_metadata_defaults_on_and_can_be_disabled() {
+        assert!(Config::default().picker.agent_metadata);
+        let defaults: Config = toml::from_str("[picker]").unwrap();
+        assert!(defaults.picker.agent_metadata);
+        let disabled: Config = toml::from_str("[picker]\nagent_metadata = false").unwrap();
+        assert!(!disabled.picker.agent_metadata);
     }
 
     #[test]

@@ -122,6 +122,7 @@ impl App {
             entries.extend(collect_agents(
                 &workspace_entries,
                 &self.config.agent_aliases,
+                self.config.picker.agent_metadata,
             ));
         }
         if self.config.sources.herdr_plus_quick_actions && herdr_plus_quick_actions_dir().is_dir() {

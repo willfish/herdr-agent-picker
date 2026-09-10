@@ -35,6 +35,11 @@ source_priority_boost = 5
 # - spaces: keep Herdr/pane order
 agent_sort = "herdr"
 
+# Show and search Herdr's display_agent label (model and reasoning effort).
+# Falls back to the agent name/kind when metadata is absent or blank.
+# Set false to use the original name/kind-only display and search.
+agent_metadata = true
+
 # Show the right-side preview pane on open. Ctrl-O toggles it at runtime.
 preview = true
 

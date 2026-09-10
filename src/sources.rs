@@ -119,15 +119,17 @@ fn workspaces_from_json(
 pub(crate) fn collect_agents(
     workspaces: &[Entry],
     aliases: &[crate::config::AgentAliasConfig],
+    agent_metadata: bool,
 ) -> Vec<Entry> {
     let agent_json = herdr_json(["agent", "list"]).unwrap_or(Value::Null);
-    agents_from_json(&agent_json, workspaces, aliases)
+    agents_from_json(&agent_json, workspaces, aliases, agent_metadata)
 }
 
 fn agents_from_json(
     agent_json: &Value,
     workspaces: &[Entry],
     aliases: &[crate::config::AgentAliasConfig],
+    agent_metadata: bool,
 ) -> Vec<Entry> {
     let workspace_labels: HashMap<&str, &str> = workspaces
         .iter()
@@ -178,7 +180,12 @@ fn agents_from_json(
                 .filter(|alias| alias.matches(agent, workspace_label, cwd))
                 .map(|alias| alias.alias.clone())
                 .collect();
-            let display_agent = agent_name.unwrap_or(agent);
+            let metadata = p
+                .get("display_agent")
+                .and_then(Value::as_str)
+                .map(str::trim)
+                .filter(|label| agent_metadata && !label.is_empty());
+            let display_agent = metadata.or(agent_name).unwrap_or(agent);
             let title = match task_title {
                 Some(task) => format!("{display_agent} · {task} · {workspace_label} · {dir}"),
                 None => format!("{display_agent} · {workspace_label} · {dir}"),
@@ -204,6 +211,9 @@ fn agents_from_json(
             }
             if let Some(task) = task_title {
                 search_terms.push(task.into());
+            }
+            if let Some(label) = metadata {
+                search_terms.push(label.into());
             }
             search_terms.extend(alias_terms);
             entries.push(Entry {
@@ -366,7 +376,7 @@ mod tests {
              "agent_status":"working","cwd":"/tmp","focused":true,"foreground_cwd":"/tmp","name":"reviewer","pane_id":"w43:p1",
              "revision":0,"tab_id":"w43:t1","terminal_id":"term_1",
              "terminal_title_stripped":"◐ Fix buildSrc consumer surface","workspace_id":"w43"}]}});
-        let agents = agents_from_json(&agent_json, &entries, &[]);
+        let agents = agents_from_json(&agent_json, &entries, &[], true);
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].agent_target.as_deref(), Some("w43:p1"));
         assert!(matches!(
@@ -400,7 +410,7 @@ mod tests {
              "terminal_id":"term_1","workspace_id":"w1"},
             {"agent":"codex","agent_status":"idle","cwd":"/tmp","name":"   ","pane_id":"w2:p1","tab_id":"w2:t1",
              "terminal_id":"term_2","terminal_title_stripped":"  ","workspace_id":"w2"}]}});
-        let agents = agents_from_json(&agent_json, &[], &[]);
+        let agents = agents_from_json(&agent_json, &[], &[], true);
 
         assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].title, "opencode · w1 · tmp");
@@ -438,6 +448,59 @@ mod tests {
             snapshot.workspace_kind("w2", "renamed"),
             crate::model::WorkspaceKind::Project
         ));
+    }
+
+    #[test]
+    fn agent_display_metadata_is_visible_and_fuzzy_searchable() {
+        let input = serde_json::json!({"result":{"agents":[{
+            "agent":"pi", "name":"reviewer", "pane_id":"w1:p1",
+            "terminal_id":"term_1", "cwd":"/tmp", "agent_status":"idle",
+            "display_agent":"pi · medium · qwen3.8-27b"
+        }]}});
+        let agents = agents_from_json(&input, &[], &[], true);
+        let agent = &agents[0];
+        assert!(agent.title.starts_with("pi · medium · qwen3.8-27b ·"));
+        assert_eq!(agent.agent_target.as_deref(), Some("w1:p1"));
+        assert!(agent.search_terms.contains(&"reviewer".to_string()));
+        assert_eq!(agent.agent_kind.as_deref(), Some("pi"));
+        for query in ["qwn27b", "medium", "QWEN medium", "reviewer"] {
+            let mut scorer = crate::matcher::Scorer::new("nucleo", query);
+            assert!(scorer.score(&agent.haystack()).is_some(), "{query}");
+        }
+    }
+
+    #[test]
+    fn metadata_can_be_disabled_without_losing_agent_identity() {
+        let input = serde_json::json!({"result":{"agents":[{
+            "agent":"pi", "name":"reviewer", "pane_id":"w1:p1",
+            "terminal_id":"term_1", "cwd":"/tmp",
+            "display_agent":"pi · medium · qwen3.8-27b"
+        }]}});
+        let agents = agents_from_json(&input, &[], &[], false);
+        assert!(agents[0].title.starts_with("reviewer ·"));
+        assert!(!agents[0].haystack().contains("qwen3.8-27b"));
+        assert!(!agents[0].haystack().contains("medium"));
+        assert_eq!(agents[0].agent_target.as_deref(), Some("w1:p1"));
+    }
+
+    #[test]
+    fn absent_blank_or_invalid_metadata_falls_back_to_name_or_kind() {
+        for metadata in [
+            Value::Null,
+            Value::String("  ".into()),
+            serde_json::json!(42),
+        ] {
+            for name in [Value::Null, Value::String("reviewer".into())] {
+                let input = serde_json::json!({"result":{"agents":[{
+                    "agent":"pi", "name":name, "pane_id":"w1:p1", "cwd":"/tmp",
+                    "display_agent":metadata
+                }]}});
+                let agents = agents_from_json(&input, &[], &[], true);
+                let expected = name.as_str().unwrap_or("pi");
+                assert!(agents[0].title.starts_with(&format!("{expected} ·")));
+                assert!(!agents[0].search_terms.iter().any(|term| term == "  "));
+            }
+        }
     }
 
     #[test]
