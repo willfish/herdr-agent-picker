@@ -15,6 +15,10 @@ back to the agent name or kind. Set `agent_metadata = false` to disable this
 additional display and search behaviour. This only indexes metadata reported
 by the agent; it cannot infer a model or effort that Herdr has not received.
 
+Selecting an agent focuses its pane and then explicitly activates its live tab.
+This also switches visible clients on Herdr 0.8/0.9, where `agent focus` alone
+updates server selection without moving the client's displayed tab.
+
 For an agent-only picker, enable only `agents` under `[sources]`, disable
 `[jump_back] enabled` and `pin_previous`, and set `[picker] preview = false`.
 See [the agent-only configuration](examples/agent-only.toml).

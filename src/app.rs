@@ -314,9 +314,7 @@ impl App {
             None
         };
         let (result, notify_success, notify_failure) = match &e.action {
-            EntryAction::FocusAgent { target } => {
-                (run_herdr(["agent", "focus", target]), true, true)
-            }
+            EntryAction::FocusAgent { target } => (crate::herdr::focus_agent(target), true, true),
             EntryAction::FocusWorkspace { id } => {
                 (run_herdr(["workspace", "focus", id]), true, true)
             }

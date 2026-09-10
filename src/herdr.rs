@@ -21,6 +21,26 @@ pub(crate) fn herdr_json<const N: usize>(args: [&str; N]) -> Result<Value, Strin
     }
     serde_json::from_slice(&out.stdout).map_err(|e| e.to_string())
 }
+pub(crate) fn focus_agent(target: &str) -> Result<(), String> {
+    focus_agent_with(target, herdr_json)
+}
+
+fn focus_agent_with(
+    target: &str,
+    mut request: impl FnMut([&str; 3]) -> Result<Value, String>,
+) -> Result<(), String> {
+    let focused = request(["agent", "focus", target])?;
+    let tab = focused
+        .pointer("/result/agent/tab_id")
+        .and_then(Value::as_str)
+        .filter(|tab| !tab.is_empty())
+        .ok_or_else(|| "Herdr did not return the focused agent's tab".to_string())?;
+    // agent.focus changes server selection, but Herdr 0.8/0.9 only projects
+    // explicit tab/workspace/pane focus requests into visible shell clients.
+    // Use the returned live tab, not the potentially stale picker entry.
+    request(["tab", "focus", tab]).map(|_| ())
+}
+
 pub(crate) fn run_herdr<const N: usize>(args: [&str; N]) -> Result<(), String> {
     let status = Command::new(herdr_bin())
         .args(args)
@@ -166,6 +186,55 @@ mod tests {
             notification_audio(&custom, "done"),
             ("none", Some("~/sounds/navigator.wav"))
         );
+    }
+
+    #[test]
+    fn agent_selection_activates_the_live_tab_in_visible_clients() {
+        let mut calls = Vec::new();
+        focus_agent_with("w1:p2", |args| {
+            calls.push(args.map(str::to_string));
+            Ok(serde_json::json!({"result":{"agent":{"tab_id":"w2:t9"}}}))
+        })
+        .unwrap();
+        assert_eq!(
+            calls,
+            vec![
+                ["agent", "focus", "w1:p2"].map(str::to_string),
+                ["tab", "focus", "w2:t9"].map(str::to_string),
+            ]
+        );
+    }
+
+    #[test]
+    fn failed_agent_focus_does_not_activate_a_tab() {
+        let mut calls = 0;
+        let result = focus_agent_with("w1:p2", |_| {
+            calls += 1;
+            Err("agent no longer exists".into())
+        });
+        assert_eq!(result, Err("agent no longer exists".into()));
+        assert_eq!(calls, 1);
+    }
+
+    #[test]
+    fn agent_selection_reports_missing_tab_and_activation_failures() {
+        for tab_id in [Value::Null, Value::String(String::new())] {
+            let mut calls = 0;
+            let result = focus_agent_with("w1:p2", |_| {
+                calls += 1;
+                Ok(serde_json::json!({"result":{"agent":{"tab_id":tab_id}}}))
+            });
+            assert!(result.is_err());
+            assert_eq!(calls, 1);
+        }
+        let result = focus_agent_with("w1:p2", |args| {
+            if args[0] == "tab" {
+                Err("tab closed".into())
+            } else {
+                Ok(serde_json::json!({"result":{"agent":{"tab_id":"w1:t1"}}}))
+            }
+        });
+        assert_eq!(result, Err("tab closed".into()));
     }
 
     #[test]
