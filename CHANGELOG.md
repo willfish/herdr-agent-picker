@@ -5,7 +5,7 @@ All notable changes to this project are documented here.
 ## [Unreleased]
 
 ### Fixed
-- Agent search includes renamed tab labels, so a query such as a tab name matches every agent pane on that tab.
+- Agent search includes renamed tab and pane labels, so a query such as a tab or pane name matches the agents sitting there.
 
 ### Added
 - Agent rows show the current terminal task when Herdr provides one, alongside fuzzy search and Preview support.
