@@ -122,11 +122,36 @@ pub(crate) fn collect_agents(
     agent_metadata: bool,
 ) -> Vec<Entry> {
     let agent_json = herdr_json(["agent", "list"]).unwrap_or(Value::Null);
-    agents_from_json(&agent_json, workspaces, aliases, agent_metadata)
+    // Tab renames are not on agent rows. Without this join, a named tab such
+    // as "neil review" cannot find the agents sitting in it.
+    let tab_json = herdr_json(["tab", "list"]).unwrap_or(Value::Null);
+    agents_from_json(&agent_json, &tab_json, workspaces, aliases, agent_metadata)
+}
+
+fn tab_labels_from_json(tab_json: &Value) -> HashMap<&str, &str> {
+    let mut labels = HashMap::new();
+    let Some(tabs) = tab_json.pointer("/result/tabs").and_then(|v| v.as_array()) else {
+        return labels;
+    };
+    for tab in tabs {
+        let Some(id) = tab.get("tab_id").and_then(|v| v.as_str()) else {
+            continue;
+        };
+        let Some(label) = tab
+            .get("label")
+            .and_then(|v| v.as_str())
+            .filter(|label| !label.trim().is_empty())
+        else {
+            continue;
+        };
+        labels.insert(id, label);
+    }
+    labels
 }
 
 fn agents_from_json(
     agent_json: &Value,
+    tab_json: &Value,
     workspaces: &[Entry],
     aliases: &[crate::config::AgentAliasConfig],
     agent_metadata: bool,
@@ -135,6 +160,7 @@ fn agents_from_json(
         .iter()
         .filter_map(|entry| Some((entry.workspace_id.as_deref()?, entry.title.as_str())))
         .collect();
+    let tab_labels = tab_labels_from_json(tab_json);
     let mut entries = Vec::new();
     if let Some(agents) = agent_json
         .pointer("/result/agents")
@@ -186,9 +212,18 @@ fn agents_from_json(
                 .map(str::trim)
                 .filter(|label| agent_metadata && !label.is_empty());
             let display_agent = metadata.or(agent_name).unwrap_or(agent);
-            let title = match task_title {
-                Some(task) => format!("{display_agent} · {task} · {workspace_label} · {dir}"),
-                None => format!("{display_agent} · {workspace_label} · {dir}"),
+            let tab_label = tab_labels.get(tab).copied();
+            let title = match (tab_label, task_title) {
+                (Some(tab_name), Some(task)) => {
+                    format!("{display_agent} · {tab_name} · {task} · {workspace_label} · {dir}")
+                }
+                (Some(tab_name), None) => {
+                    format!("{display_agent} · {tab_name} · {workspace_label} · {dir}")
+                }
+                (None, Some(task)) => {
+                    format!("{display_agent} · {task} · {workspace_label} · {dir}")
+                }
+                (None, None) => format!("{display_agent} · {workspace_label} · {dir}"),
             };
             let subtitle = format!("{status} · {pane} · {tab}");
             let mut search_terms = vec![
@@ -208,6 +243,9 @@ fn agents_from_json(
             }
             if let Some(name) = agent_name {
                 search_terms.push(name.into());
+            }
+            if let Some(label) = tab_label {
+                search_terms.push(label.into());
             }
             if let Some(task) = task_title {
                 search_terms.push(task.into());
@@ -376,7 +414,7 @@ mod tests {
              "agent_status":"working","cwd":"/tmp","focused":true,"foreground_cwd":"/tmp","name":"reviewer","pane_id":"w43:p1",
              "revision":0,"tab_id":"w43:t1","terminal_id":"term_1",
              "terminal_title_stripped":"◐ Fix buildSrc consumer surface","workspace_id":"w43"}]}});
-        let agents = agents_from_json(&agent_json, &entries, &[], true);
+        let agents = agents_from_json(&agent_json, &Value::Null, &entries, &[], true);
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0].agent_target.as_deref(), Some("w43:p1"));
         assert!(matches!(
@@ -410,7 +448,7 @@ mod tests {
              "terminal_id":"term_1","workspace_id":"w1"},
             {"agent":"codex","agent_status":"idle","cwd":"/tmp","name":"   ","pane_id":"w2:p1","tab_id":"w2:t1",
              "terminal_id":"term_2","terminal_title_stripped":"  ","workspace_id":"w2"}]}});
-        let agents = agents_from_json(&agent_json, &[], &[], true);
+        let agents = agents_from_json(&agent_json, &Value::Null, &[], &[], true);
 
         assert_eq!(agents.len(), 2);
         assert_eq!(agents[0].title, "opencode · w1 · tmp");
@@ -457,7 +495,7 @@ mod tests {
             "terminal_id":"term_1", "cwd":"/tmp", "agent_status":"idle",
             "display_agent":"pi · medium · qwen3.8-27b"
         }]}});
-        let agents = agents_from_json(&input, &[], &[], true);
+        let agents = agents_from_json(&input, &Value::Null, &[], &[], true);
         let agent = &agents[0];
         assert!(agent.title.starts_with("pi · medium · qwen3.8-27b ·"));
         assert_eq!(agent.agent_target.as_deref(), Some("w1:p1"));
@@ -476,7 +514,7 @@ mod tests {
             "terminal_id":"term_1", "cwd":"/tmp",
             "display_agent":"pi · medium · qwen3.8-27b"
         }]}});
-        let agents = agents_from_json(&input, &[], &[], false);
+        let agents = agents_from_json(&input, &Value::Null, &[], &[], false);
         assert!(agents[0].title.starts_with("reviewer ·"));
         assert!(!agents[0].haystack().contains("qwen3.8-27b"));
         assert!(!agents[0].haystack().contains("medium"));
@@ -495,12 +533,40 @@ mod tests {
                     "agent":"pi", "name":name, "pane_id":"w1:p1", "cwd":"/tmp",
                     "display_agent":metadata
                 }]}});
-                let agents = agents_from_json(&input, &[], &[], true);
+                let agents = agents_from_json(&input, &Value::Null, &[], &[], true);
                 let expected = name.as_str().unwrap_or("pi");
                 assert!(agents[0].title.starts_with(&format!("{expected} ·")));
                 assert!(!agents[0].search_terms.iter().any(|term| term == "  "));
             }
         }
+    }
+
+    #[test]
+    fn renamed_tab_label_finds_every_agent_on_that_tab() {
+        let agents_json = serde_json::json!({"result":{"agents":[
+            {"agent":"pi","pane_id":"w59:p1C","tab_id":"w59:tK","cwd":"/tmp/backend","agent_status":"blocked","workspace_id":"w59","display_agent":"pi · medium · grok-4.7"},
+            {"agent":"pi","pane_id":"w59:p1D","tab_id":"w59:tK","cwd":"/tmp/backend","agent_status":"blocked","workspace_id":"w59","display_agent":"pi · medium · qwen3.8-27b"},
+            {"agent":"pi","pane_id":"w59:p1E","tab_id":"w59:tK","cwd":"/tmp/backend","agent_status":"done","workspace_id":"w59","display_agent":"pi · high · glm"},
+            {"agent":"pi","pane_id":"w59:p1","tab_id":"w59:t1","cwd":"/tmp/backend","agent_status":"working","workspace_id":"w59","display_agent":"pi · medium · gpt-6-astra"}
+        ]}});
+        let tabs_json = serde_json::json!({"result":{"tabs":[
+            {"tab_id":"w59:tK","label":"2 neil review","workspace_id":"w59"},
+            {"tab_id":"w59:t1","label":"1 workbook","workspace_id":"w59"},
+            {"tab_id":"w5A:t1","label":"   ","workspace_id":"w5A"}
+        ]}});
+        let agents = agents_from_json(&agents_json, &tabs_json, &[], &[], true);
+        assert_eq!(agents.len(), 4);
+        let matched: Vec<_> = agents
+            .iter()
+            .filter(|agent| {
+                let mut scorer = crate::matcher::Scorer::new("nucleo", "neil review");
+                scorer.score(&agent.haystack()).is_some()
+            })
+            .map(|agent| agent.agent_target.clone().unwrap_or_default())
+            .collect();
+        assert_eq!(matched, vec!["w59:p1C", "w59:p1D", "w59:p1E"]);
+        assert!(agents[0].title.contains("2 neil review"));
+        assert!(!agents[3].title.contains("neil review"));
     }
 
     #[test]

@@ -4,6 +4,9 @@ All notable changes to this project are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- Agent search includes renamed tab labels, so a query such as a tab name matches every agent pane on that tab.
+
 ### Added
 - Agent rows show the current terminal task when Herdr provides one, alongside fuzzy search and Preview support.
 - Navigator-specific `[theme].name` and `[theme.custom]` overrides. Navigator layers inherited Herdr custom tokens beneath its own custom tokens ([#20](https://github.com/thanhdat77/herdr-navigator/issues/20)).
